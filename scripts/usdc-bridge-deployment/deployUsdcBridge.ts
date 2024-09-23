@@ -54,7 +54,7 @@ import fs from 'fs'
 
 dotenv.config()
 
-const REGISTRATION_TX_FILE = 'registerUsdcGatewayTx.json'
+const REGISTRATION_TX_FILE = '/config/registerUsdcGatewayTx.json'
 
 main().then(() => console.log('Done.'))
 
