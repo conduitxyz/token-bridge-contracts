@@ -197,7 +197,7 @@ async function _deployBridgedUsdc(
   const lostAndFound = deployerL2Wallet
   await (
     await l2UsdcFiatToken.initialize(
-      'USDC',
+      'Bridged USDC',
       'USDC.e',
       'USD',
       6,
@@ -207,13 +207,13 @@ async function _deployBridgedUsdc(
       deployerL2Wallet.address
     )
   ).wait()
-  await (await l2UsdcFiatToken.initializeV2('USDC')).wait()
+  await (await l2UsdcFiatToken.initializeV2('Bridged USDC')).wait()
   await (await l2UsdcFiatToken.initializeV2_1(lostAndFound.address)).wait()
   await (await l2UsdcFiatToken.initializeV2_2([], 'USDC.e')).wait()
 
   /// verify initialization
   if (
-    (await l2UsdcFiatToken.name()) != 'USDC' ||
+    (await l2UsdcFiatToken.name()) != 'Bridged USDC' ||
     (await l2UsdcFiatToken.symbol()) != 'USDC.e' ||
     (await l2UsdcFiatToken.currency()) != 'USD' ||
     (await l2UsdcFiatToken.decimals()) != 6 ||
