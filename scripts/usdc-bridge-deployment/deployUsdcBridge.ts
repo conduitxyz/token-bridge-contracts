@@ -90,7 +90,7 @@ async function main() {
   const proxyAdminL2 = await _deployProxyAdmin(deployerL2)
   console.log('L2 ProxyAdmin deployed: ', proxyAdminL2.address)
 
-  const { l2Usdc, masterMinter, sigCheckerLib } = await _deployBridgedUsdc(
+  const { l2Usdc, l2UsdcLogic, masterMinter, sigCheckerLib } = await _deployBridgedUsdc(
     deployerL2,
     proxyAdminL2
   )
@@ -141,6 +141,7 @@ async function main() {
     l1UsdcGateway: l1UsdcGateway.address,
     l2UsdcGateway: l2UsdcGateway.address,
     sigCheckerLib: sigCheckerLib.address,
+    l2UsdcLogic: l2UsdcLogic.address,
   }))
 }
 
@@ -260,7 +261,7 @@ async function _deployBridgedUsdc(
     deployerL2Wallet
   )
 
-  return { l2Usdc, masterMinter, sigCheckerLib }
+  return { l2Usdc, l2UsdcLogic, masterMinter, sigCheckerLib }
 }
 
 async function _deployUsdcLogic(deployer: Wallet) {
@@ -289,7 +290,7 @@ async function _deployUsdcLogic(deployer: Wallet) {
   )
   const bridgedUsdcLogic = await bridgedUsdcLogicFactory.deploy()
 
-  return { bridgedUsdcLogic, sigCheckerLib }
+  return { l2UsdcLogic: bridgedUsdcLogic, sigCheckerLib }
 }
 
 async function _deployUsdcProxy(
