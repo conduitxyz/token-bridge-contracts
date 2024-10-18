@@ -675,7 +675,7 @@ async function _waitOnL2Msg(tx: ContractTransaction, childProvider: Provider) {
   const messages = await l1TxReceipt.getL1ToL2Messages(childProvider)
 
   // 1 msg expected
-  const messageResult = await messages[0].waitForStatus()
+  const messageResult = await messages[0].waitForStatus(undefined, 60 * 60 * 1000) // 1hr timeout
   const status = messageResult.status
 
   if (status != L1ToL2MessageStatus.REDEEMED) {
