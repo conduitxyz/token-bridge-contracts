@@ -50,6 +50,7 @@ import {
 } from '@arbitrum/sdk'
 import { RollupAdminLogic__factory } from '@arbitrum/sdk/dist/lib/abi/factories/RollupAdminLogic__factory'
 import { getBaseFee } from '@arbitrum/sdk/dist/lib/utils/lib'
+import { Overrides } from '@ethersproject/contracts'
 import fs from 'fs'
 
 dotenv.config()
@@ -84,26 +85,43 @@ async function main() {
   await _registerNetworks(deployerL1.provider, deployerL2.provider, inbox)
   console.log('Networks registered in SDK')
 
-  const proxyAdminL1 = await _deployProxyAdmin(deployerL1)
+  const parentChainId = await deployerL1.getChainId()
+  let parentOverrides: Overrides = {}
+  if (parentChainId === 42161 || parentChainId === 421614) {
+    const parentBaseFee = await getBaseFee(deployerL1.provider)
+    parentOverrides = {
+      maxFeePerGas: BigNumber.from(0),
+      maxPriorityFeePerGas: BigNumber.from(0),
+    }
+  }
+  const childBaseFee = await getBaseFee(deployerL2.provider)
+  const childOverrides: Overrides = {
+    maxFeePerGas: childBaseFee,
+    maxPriorityFeePerGas: 0,
+  }
+
+  const proxyAdminL1 = await _deployProxyAdmin(deployerL1, parentOverrides)
   console.log('L1 ProxyAdmin deployed: ', proxyAdminL1.address)
 
-  const proxyAdminL2 = await _deployProxyAdmin(deployerL2)
+  const proxyAdminL2 = await _deployProxyAdmin(deployerL2, childOverrides)
   console.log('L2 ProxyAdmin deployed: ', proxyAdminL2.address)
 
   const { l2Usdc, l2UsdcLogic, masterMinter, sigCheckerLib } = await _deployBridgedUsdc(
     deployerL2,
-    proxyAdminL2
+    proxyAdminL2,
+    childOverrides
   )
   console.log('Bridged (L2) USDC deployed: ', l2Usdc.address)
 
   const l1UsdcGateway = await _deployL1UsdcGateway(
     deployerL1,
     proxyAdminL1,
-    inbox
+    inbox,
+    parentOverrides
   )
   console.log('L1 USDC gateway deployed: ', l1UsdcGateway.address)
 
-  const l2UsdcGateway = await _deployL2UsdcGateway(deployerL2, proxyAdminL2)
+  const l2UsdcGateway = await _deployL2UsdcGateway(deployerL2, proxyAdminL2, childOverrides)
   console.log('L2 USDC gateway deployed: ', l2UsdcGateway.address)
 
   await _initializeGateways(
@@ -112,7 +130,9 @@ async function main() {
     inbox,
     l2Usdc.address,
     deployerL1,
-    deployerL2
+    deployerL2,
+    parentOverrides,
+    childOverrides
   )
   console.log('Usdc gateways initialized')
 
@@ -120,7 +140,9 @@ async function main() {
     deployerL1.provider,
     deployerL2.provider,
     inbox,
-    l1UsdcGateway.address
+    l1UsdcGateway.address,
+    parentOverrides,
+    childOverrides,
   )
   if (!process.env['ROLLUP_OWNER_KEY']) {
     console.log(
@@ -131,7 +153,7 @@ async function main() {
     console.log('Usdc gateway registered')
   }
 
-  await _addMinterRoleToL2Gateway(l2UsdcGateway, deployerL2, masterMinter)
+  await _addMinterRoleToL2Gateway(l2UsdcGateway, deployerL2, masterMinter, childOverrides)
   console.log('Minter role with max allowance added to L2 gateway')
   fs.writeFileSync('/config/usdc.json', JSON.stringify({
     proxyAdminL1: proxyAdminL1.address,
@@ -163,21 +185,23 @@ async function _loadWallets(): Promise<{
   return { deployerL1, deployerL2 }
 }
 
-async function _deployProxyAdmin(deployer: Wallet): Promise<ProxyAdmin> {
-  const proxyAdminFac = await new ProxyAdmin__factory(deployer).deploy()
+async function _deployProxyAdmin(deployer: Wallet, overrides?: Overrides): Promise<ProxyAdmin> {
+  const proxyAdminFac = await new ProxyAdmin__factory(deployer).deploy(overrides)
   return await proxyAdminFac.deployed()
 }
 
 async function _deployBridgedUsdc(
   deployerL2Wallet: Wallet,
-  proxyAdminL2: ProxyAdmin
+  proxyAdminL2: ProxyAdmin,
+  overrides: Overrides
 ) {
   /// create l2 usdc behind proxy
-  const { l2UsdcLogic, sigCheckerLib } = await _deployUsdcLogic(deployerL2Wallet)
+  const { l2UsdcLogic, sigCheckerLib } = await _deployUsdcLogic(deployerL2Wallet, overrides)
   const l2UsdcProxyAddress = await _deployUsdcProxy(
     deployerL2Wallet,
     l2UsdcLogic.address,
-    proxyAdminL2.address
+    proxyAdminL2.address,
+    overrides
   )
 
   /// deploy master minter
@@ -186,7 +210,7 @@ async function _deployBridgedUsdc(
     MasterMinterBytecode,
     deployerL2Wallet
   )
-  const masterMinter = await masterMinterL2Fac.deploy(l2UsdcProxyAddress)
+  const masterMinter = await masterMinterL2Fac.deploy(l2UsdcProxyAddress, overrides)
 
   /// init usdc proxy
   const l2UsdcFiatToken = IFiatToken__factory.connect(
@@ -206,12 +230,13 @@ async function _deployBridgedUsdc(
       masterMinter.address,
       pauserL2.address,
       blacklisterL2.address,
-      deployerL2Wallet.address
+      deployerL2Wallet.address,
+      overrides
     )
   ).wait()
-  await (await l2UsdcFiatToken.initializeV2('Bridged USDC')).wait()
-  await (await l2UsdcFiatToken.initializeV2_1(lostAndFound.address)).wait()
-  await (await l2UsdcFiatToken.initializeV2_2([], 'USDC.e')).wait()
+  await (await l2UsdcFiatToken.initializeV2('Bridged USDC', overrides)).wait()
+  await (await l2UsdcFiatToken.initializeV2_1(lostAndFound.address, overrides)).wait()
+  await (await l2UsdcFiatToken.initializeV2_2([], 'USDC.e', overrides)).wait()
 
   /// verify initialization
   if (
@@ -236,11 +261,11 @@ async function _deployBridgedUsdc(
   )
   const DEAD = '0x000000000000000000000000000000000000dEaD'
   await (
-    await l2UsdcLogicInit.initialize('', '', '', 0, DEAD, DEAD, DEAD, DEAD)
+    await l2UsdcLogicInit.initialize('', '', '', 0, DEAD, DEAD, DEAD, DEAD, overrides)
   ).wait()
-  await (await l2UsdcLogicInit.initializeV2('')).wait()
-  await (await l2UsdcLogicInit.initializeV2_1(DEAD)).wait()
-  await (await l2UsdcLogicInit.initializeV2_2([], '')).wait()
+  await (await l2UsdcLogicInit.initializeV2('', overrides)).wait()
+  await (await l2UsdcLogicInit.initializeV2_1(DEAD, overrides)).wait()
+  await (await l2UsdcLogicInit.initializeV2_2([], '', overrides)).wait()
 
   /// verify logic initialization
   if (
@@ -264,14 +289,14 @@ async function _deployBridgedUsdc(
   return { l2Usdc, l2UsdcLogic, masterMinter, sigCheckerLib }
 }
 
-async function _deployUsdcLogic(deployer: Wallet) {
+async function _deployUsdcLogic(deployer: Wallet, overrides: Overrides) {
   /// deploy sig checker library
   const sigCheckerFac = new ethers.ContractFactory(
     SigCheckerAbi,
     SigCheckerBytecode,
     deployer
   )
-  const sigCheckerLib = await sigCheckerFac.deploy()
+  const sigCheckerLib = await sigCheckerFac.deploy(overrides)
 
   // link library to usdc bytecode
   const bytecodeWithPlaceholder: string = UsdcBytecode
@@ -288,7 +313,7 @@ async function _deployUsdcLogic(deployer: Wallet) {
     bridgedUsdcLogicBytecode,
     deployer
   )
-  const bridgedUsdcLogic = await bridgedUsdcLogicFactory.deploy()
+  const bridgedUsdcLogic = await bridgedUsdcLogicFactory.deploy(overrides)
 
   return { l2UsdcLogic: bridgedUsdcLogic, sigCheckerLib }
 }
@@ -296,7 +321,8 @@ async function _deployUsdcLogic(deployer: Wallet) {
 async function _deployUsdcProxy(
   deployer: Wallet,
   bridgedUsdcLogic: string,
-  proxyAdmin: string
+  proxyAdmin: string,
+  overrides: Overrides
 ) {
   /// deploy circle's proxy used for usdc
   const usdcProxyFactory = new ethers.ContractFactory(
@@ -304,14 +330,14 @@ async function _deployUsdcProxy(
     UsdcProxyBytecode,
     deployer
   )
-  const usdcProxy = await usdcProxyFactory.deploy(bridgedUsdcLogic)
+  const usdcProxy = await usdcProxyFactory.deploy(bridgedUsdcLogic, overrides)
 
   /// set proxy admin
   await (
     await IFiatTokenProxy__factory.connect(
       usdcProxy.address,
       deployer
-    ).changeAdmin(proxyAdmin)
+    ).changeAdmin(proxyAdmin, overrides)
   ).wait()
 
   return usdcProxy.address
@@ -320,19 +346,20 @@ async function _deployUsdcProxy(
 async function _deployL1UsdcGateway(
   deployerL1: Wallet,
   proxyAdmin: ProxyAdmin,
-  inboxAddress: string
+  inboxAddress: string,
+  overrides: Overrides
 ): Promise<L1USDCGateway | L1OrbitUSDCGateway> {
   const isFeeToken =
     (await _getFeeToken(inboxAddress, deployerL1.provider)) !=
     ethers.constants.AddressZero
 
   const l1UsdcGatewayFactory = isFeeToken
-    ? await new L1OrbitUSDCGateway__factory(deployerL1).deploy()
-    : await new L1USDCGateway__factory(deployerL1).deploy()
+    ? await new L1OrbitUSDCGateway__factory(deployerL1).deploy(overrides)
+    : await new L1USDCGateway__factory(deployerL1).deploy(overrides)
   const l1UsdcGatewayLogic = await l1UsdcGatewayFactory.deployed()
   const tupFactory = await new TransparentUpgradeableProxy__factory(
     deployerL1
-  ).deploy(l1UsdcGatewayLogic.address, proxyAdmin.address, '0x')
+  ).deploy(l1UsdcGatewayLogic.address, proxyAdmin.address, '0x', overrides)
   const tup = await tupFactory.deployed()
   return isFeeToken
     ? L1OrbitUSDCGateway__factory.connect(tup.address, deployerL1)
@@ -341,15 +368,16 @@ async function _deployL1UsdcGateway(
 
 async function _deployL2UsdcGateway(
   deployerL2: Wallet,
-  proxyAdmin: ProxyAdmin
+  proxyAdmin: ProxyAdmin,
+  overrides: Overrides,
 ): Promise<L2USDCGateway> {
   const l2USDCCustomGatewayFactory = await new L2USDCGateway__factory(
     deployerL2
-  ).deploy()
+  ).deploy(overrides)
   const l2USDCCustomGatewayLogic = await l2USDCCustomGatewayFactory.deployed()
   const tupFactory = await new TransparentUpgradeableProxy__factory(
     deployerL2
-  ).deploy(l2USDCCustomGatewayLogic.address, proxyAdmin.address, '0x')
+  ).deploy(l2USDCCustomGatewayLogic.address, proxyAdmin.address, '0x', overrides)
   const tup = await tupFactory.deployed()
   return L2USDCGateway__factory.connect(tup.address, deployerL2)
 }
@@ -363,7 +391,9 @@ async function _initializeGateways(
   inbox: string,
   l2Usdc: string,
   deployerL1: Wallet,
-  deployerL2: Wallet
+  deployerL2: Wallet,
+  overridesL1: Overrides,
+  overridesL2: Overrides
 ) {
   const l1Router = process.env['L1_ROUTER'] as string
   const l2Router = process.env['L2_ROUTER'] as string
@@ -376,7 +406,7 @@ async function _initializeGateways(
   await (
     await l1UsdcGateway
       .connect(deployerL1)
-      .initialize(_l2CounterPart, l1Router, inbox, l1Usdc, l2Usdc, _owner)
+      .initialize(_l2CounterPart, l1Router, inbox, l1Usdc, l2Usdc, _owner, overridesL1)
   ).wait()
 
   /// initialize L2 gateway
@@ -388,7 +418,8 @@ async function _initializeGateways(
       l2Router,
       l1Usdc,
       l2Usdc,
-      ownerL2
+      ownerL2,
+      overridesL2
     )
   ).wait()
 
@@ -423,7 +454,9 @@ async function _registerGateway(
   parentProvider: Provider,
   childProvider: Provider,
   inbox: string,
-  l1UsdcGatewayAddress: string
+  l1UsdcGatewayAddress: string,
+  parentOverrides: Overrides,
+  childOverrides: Overrides
 ) {
   const isFeeToken =
     (await _getFeeToken(inbox, parentProvider)) != ethers.constants.AddressZero
@@ -559,7 +592,7 @@ async function _registerGateway(
       await (
         await feeTokenContract
           .connect(rollupOwner)
-          .transfer(upgradeExecutor.address, totalFee)
+          .transfer(upgradeExecutor.address, totalFee, parentOverrides)
       ).wait()
 
       // approve router to spend the fee token
@@ -571,7 +604,8 @@ async function _registerGateway(
             feeTokenContract.interface.encodeFunctionData('approve', [
               l1RouterAddress,
               totalFee,
-            ])
+            ]),
+            parentOverrides
           )
       ).wait()
     }
@@ -580,9 +614,11 @@ async function _registerGateway(
     const gwRegistrationTx = await upgradeExecutor
       .connect(rollupOwner)
       .executeCall(l1Router.address, registrationCalldata, {
+        ...parentOverrides,
         value: isFeeToken ? BigNumber.from(0) : totalFee,
       })
     await _waitOnL2Msg(gwRegistrationTx, childProvider)
+    fs.writeFileSync(REGISTRATION_TX_FILE, gwRegistrationTx.hash)
   }
 }
 
@@ -593,17 +629,19 @@ async function _registerGateway(
 async function _addMinterRoleToL2Gateway(
   l2UsdcGateway: L2USDCGateway,
   masterMinterOwner: Wallet,
-  masterMinter: Contract
+  masterMinter: Contract,
+  overrides: Overrides
 ) {
   await (
     await masterMinter['configureController(address,address)'](
       masterMinterOwner.address,
-      l2UsdcGateway.address
+      l2UsdcGateway.address,
+      overrides
     )
   ).wait()
 
   await (
-    await masterMinter['configureMinter(uint256)'](ethers.constants.MaxUint256)
+    await masterMinter['configureMinter(uint256)'](ethers.constants.MaxUint256, overrides)
   ).wait()
 }
 
