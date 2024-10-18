@@ -90,8 +90,8 @@ async function main() {
   if (parentChainId === 42161 || parentChainId === 421614) {
     const parentBaseFee = await getBaseFee(deployerL1.provider)
     parentOverrides = {
-      maxFeePerGas: BigNumber.from(0),
-      maxPriorityFeePerGas: BigNumber.from(0),
+      maxFeePerGas: parentBaseFee,
+      maxPriorityFeePerGas: 0,
     }
   }
   const childBaseFee = await getBaseFee(deployerL2.provider)
