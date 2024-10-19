@@ -88,15 +88,15 @@ async function main() {
   const parentChainId = await deployerL1.getChainId()
   let parentOverrides: Overrides = {}
   if (parentChainId === 42161 || parentChainId === 421614) {
-    const parentBaseFee = await getBaseFee(deployerL1.provider)
+    const parentGasPrice = await deployerL1.provider.getGasPrice()
     parentOverrides = {
-      maxFeePerGas: parentBaseFee,
+      maxFeePerGas: parentGasPrice.mul(3).div(2), // allows baseFee to increase by 50%
       maxPriorityFeePerGas: 0,
     }
   }
-  const childBaseFee = await getBaseFee(deployerL2.provider)
+  const childGasPrice = await deployerL1.provider.getGasPrice()
   const childOverrides: Overrides = {
-    maxFeePerGas: childBaseFee,
+    maxFeePerGas: childGasPrice.mul(3).div(2), // allows baseFee to increase by 50%
     maxPriorityFeePerGas: 0,
   }
 
