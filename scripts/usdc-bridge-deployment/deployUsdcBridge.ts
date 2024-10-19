@@ -89,12 +89,16 @@ async function main() {
   let parentOverrides: Overrides = {}
   if (parentChainId === 42161 || parentChainId === 421614) {
     const parentGasPrice = await deployerL1.provider.getGasPrice()
+    console.log(`Parent gas price: ${parentGasPrice}`)
+    console.log(`Adjusting parent maxFeePerGas to ${parentGasPrice.mul(3).div(2)}`)
     parentOverrides = {
       maxFeePerGas: parentGasPrice.mul(3).div(2), // allows baseFee to increase by 50%
       maxPriorityFeePerGas: 0,
     }
   }
-  const childGasPrice = await deployerL1.provider.getGasPrice()
+  const childGasPrice = await deployerL2.provider.getGasPrice()
+  console.log(`Child gas price: ${childGasPrice}`)
+  console.log(`Adjusting child maxFeePerGas to ${childGasPrice.mul(3).div(2)}`)
   const childOverrides: Overrides = {
     maxFeePerGas: childGasPrice.mul(3).div(2), // allows baseFee to increase by 50%
     maxPriorityFeePerGas: 0,
