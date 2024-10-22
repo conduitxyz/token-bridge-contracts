@@ -560,10 +560,17 @@ async function _registerGateway(
       })
 
       // prepare TX to approve router to spend the fee token
-      const approveData = feeTokenContract.interface.encodeFunctionData(
-        'approve',
-        [l1RouterAddress, totalFee]
+      const approveData = upgradeExecutor.interface.encodeFunctionData(
+        "executeCall",
+        [
+          feeTokenContract.address,
+          feeTokenContract.interface.encodeFunctionData(
+            'approve',
+            [l1RouterAddress, totalFee]
+          )
+        ]
       )
+
       txs.push({
         to: upgradeExecutor.address,
         value: BigNumber.from(0).toString(),
