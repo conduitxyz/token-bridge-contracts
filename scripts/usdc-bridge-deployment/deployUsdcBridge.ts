@@ -215,6 +215,7 @@ async function _deployBridgedUsdc(
     deployerL2Wallet
   )
   const masterMinter = await masterMinterL2Fac.deploy(l2UsdcProxyAddress, overrides)
+  await masterMinter.deployed()
 
   /// init usdc proxy
   const l2UsdcFiatToken = IFiatToken__factory.connect(
@@ -301,6 +302,7 @@ async function _deployUsdcLogic(deployer: Wallet, overrides: Overrides) {
     deployer
   )
   const sigCheckerLib = await sigCheckerFac.deploy(overrides)
+  await sigCheckerLib.deployed()
 
   // link library to usdc bytecode
   const bytecodeWithPlaceholder: string = UsdcBytecode
@@ -318,6 +320,7 @@ async function _deployUsdcLogic(deployer: Wallet, overrides: Overrides) {
     deployer
   )
   const bridgedUsdcLogic = await bridgedUsdcLogicFactory.deploy(overrides)
+  await bridgedUsdcLogic.deployed()
 
   return { l2UsdcLogic: bridgedUsdcLogic, sigCheckerLib }
 }
@@ -335,6 +338,7 @@ async function _deployUsdcProxy(
     deployer
   )
   const usdcProxy = await usdcProxyFactory.deploy(bridgedUsdcLogic, overrides)
+  await usdcProxy.deployed()
 
   /// set proxy admin
   await (
