@@ -31,6 +31,7 @@ interface IAUSD {
     function acceptTransferRole(bytes32 role) external;
     function ADMIN_ROLE() external view returns (bytes32);
     function MINTER_ROLE() external view returns (bytes32);
+    function BURNER_ROLE() external view returns (bytes32);
 }
 
 interface IAgoraProxyAdmin {

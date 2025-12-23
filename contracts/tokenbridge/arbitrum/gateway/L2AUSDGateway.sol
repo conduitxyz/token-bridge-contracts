@@ -121,21 +121,33 @@ contract L2AUSDGateway is L2ArbitrumGateway {
     }
 
     /**
+     * @notice Accept a role transfer from the AUSD contract.
+     * @param _role The role to accept (e.g., MINTER_ROLE, ADMIN_ROLE)
+     * @dev This must be called after someone calls transferRole on the AUSD contract
+     *      to transfer a role to this gateway.
+     */
+    function acceptAUSDRole(bytes32 _role) external onlyOwner {
+        IAUSD(l2AUSD).acceptTransferRole(_role);
+    }
+
+    /**
      * @notice In accordance with bridged AUSD standard, the ownership of the AUSD token contract is transferred
      *         to the new owner, and the proxy admin is transferred to the caller (ausdOwnershipTransferrer).
      * @dev    For transfer to be successful, this gateway should be both the owner and the proxy admin of L2 AUSD token.
+     * NOTE:  Do we need this function as we no longer give gateway the owner and proxy admin ownership currently
      */
     function transferAUSDRoles(address _owner) external {
         if (msg.sender != ausdOwnershipTransferrer) {
             revert L2AUSDGateway_NotAUSDOwnershipTransferrer();
         }
 
-        // Transfer ProxyAdmin ownership to the transferrer (msg.sender)
-        address proxyAdmin = IAUSD(l2AUSD).proxyAdminAddress();
-        IAgoraProxyAdmin(proxyAdmin).transferOwnership(msg.sender);
-        
-        // Transfer ADMIN_ROLE to the new owner
-        IAUSD(l2AUSD).transferRole(IAUSD(l2AUSD).ADMIN_ROLE(), _owner);
+        // Transfer MINTER_ROLE to the zero address to disable accepting
+        IAUSD(l2AUSD).transferRole(IAUSD(l2AUSD).MINTER_ROLE(), address(0));
+
+        // Transfer MINTER_ROLE to the zero address to disable accepting
+        IAUSD(l2AUSD).transferRole(IAUSD(l2AUSD).BURNER_ROLE(), address(0));
+
+        // TODO: if we end up transferring ausd ownerships to gateway need to also transfer them
 
         emit AUSDOwnershipTransferred(_owner, msg.sender);
     }
