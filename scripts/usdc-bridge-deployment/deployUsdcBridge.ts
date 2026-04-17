@@ -77,6 +77,54 @@ function patchFeeData(provider: JsonRpcProvider): JsonRpcProvider {
 }
 
 const REGISTRATION_TX_FILE = '/config/registerUsdcGatewayTx.json'
+const EXISTING_ADDRESSES_FILE = '/existing/usdc.json'
+
+type Addresses = {
+  proxyAdminL1: string
+  proxyAdminL2: string
+  l2Usdc: string
+  masterMinter: string
+  l1UsdcGateway: string
+  l2UsdcGateway: string
+  sigCheckerLib: string
+  l2UsdcLogic: string
+}
+
+const ADDRESS_FIELDS = [
+  'proxyAdminL1',
+  'proxyAdminL2',
+  'l2Usdc',
+  'masterMinter',
+  'l1UsdcGateway',
+  'l2UsdcGateway',
+  'sigCheckerLib',
+  'l2UsdcLogic',
+] as const
+
+function _loadExistingAddresses(): Addresses | undefined {
+  if (!fs.existsSync(EXISTING_ADDRESSES_FILE)) return undefined
+  let parsed: Partial<Addresses>
+  try {
+    parsed = JSON.parse(fs.readFileSync(EXISTING_ADDRESSES_FILE, 'utf-8'))
+  } catch (e) {
+    console.log(
+      `Failed to parse ${EXISTING_ADDRESSES_FILE}, treating as fresh deploy:`,
+      e
+    )
+    return undefined
+  }
+  const complete = ADDRESS_FIELDS.every(
+    (f) =>
+      typeof parsed[f] === 'string' && /^0x[0-9a-fA-F]{40}$/.test(parsed[f]!)
+  )
+  if (!complete) {
+    console.log(
+      `Existing address state at ${EXISTING_ADDRESSES_FILE} is missing fields or malformed, treating as fresh deploy`
+    )
+    return undefined
+  }
+  return parsed as Addresses
+}
 
 main().then(() => console.log('Done.'))
 
@@ -125,49 +173,88 @@ async function main() {
     maxPriorityFeePerGas: 0,
   }
 
-  const proxyAdminL1 = await _deployProxyAdmin(deployerL1, parentOverrides)
-  console.log('L1 ProxyAdmin deployed: ', proxyAdminL1.address)
+  // If a previous deploy run already produced addresses, reuse them. The chart
+  // mounts the `addresses` ConfigMap at /existing/usdc.json (optional). On
+  // retry this lets us skip the contract deploys and gateway init, which are
+  // one-shot (initialize() reverts on a second call) and would otherwise leave
+  // the first run's contracts orphaned.
+  const existing = _loadExistingAddresses()
+  let addresses: Addresses
 
-  const proxyAdminL2 = await _deployProxyAdmin(deployerL2, childOverrides)
-  console.log('L2 ProxyAdmin deployed: ', proxyAdminL2.address)
+  if (existing) {
+    console.log(
+      'Reusing existing deployment state, skipping contract deploys and gateway init'
+    )
+    addresses = existing
+  } else {
+    const proxyAdminL1 = await _deployProxyAdmin(deployerL1, parentOverrides)
+    console.log('L1 ProxyAdmin deployed: ', proxyAdminL1.address)
 
-  const { l2Usdc, l2UsdcLogic, masterMinter, sigCheckerLib } = await _deployBridgedUsdc(
-    deployerL2,
-    proxyAdminL2,
-    childOverrides
-  )
-  console.log('Bridged (L2) USDC deployed: ', l2Usdc.address)
+    const proxyAdminL2 = await _deployProxyAdmin(deployerL2, childOverrides)
+    console.log('L2 ProxyAdmin deployed: ', proxyAdminL2.address)
 
-  const l1UsdcGateway = await _deployL1UsdcGateway(
-    deployerL1,
-    proxyAdminL1,
-    inbox,
-    parentOverrides
-  )
-  console.log('L1 USDC gateway deployed: ', l1UsdcGateway.address)
+    const { l2Usdc, l2UsdcLogic, masterMinter, sigCheckerLib } =
+      await _deployBridgedUsdc(deployerL2, proxyAdminL2, childOverrides)
+    console.log('Bridged (L2) USDC deployed: ', l2Usdc.address)
 
-  const l2UsdcGateway = await _deployL2UsdcGateway(deployerL2, proxyAdminL2, childOverrides)
-  console.log('L2 USDC gateway deployed: ', l2UsdcGateway.address)
-  
-  await _initializeGateways(
-    l1UsdcGateway,
-    l2UsdcGateway,
-    inbox,
-    l2Usdc.address,
-    deployerL1,
-    deployerL2,
-    parentOverrides,
-    childOverrides
-  )
-  console.log('Usdc gateways initialized')
+    const l1UsdcGateway = await _deployL1UsdcGateway(
+      deployerL1,
+      proxyAdminL1,
+      inbox,
+      parentOverrides
+    )
+    console.log('L1 USDC gateway deployed: ', l1UsdcGateway.address)
 
+    const l2UsdcGateway = await _deployL2UsdcGateway(
+      deployerL2,
+      proxyAdminL2,
+      childOverrides
+    )
+    console.log('L2 USDC gateway deployed: ', l2UsdcGateway.address)
+
+    await _initializeGateways(
+      l1UsdcGateway,
+      l2UsdcGateway,
+      inbox,
+      l2Usdc.address,
+      deployerL1,
+      deployerL2,
+      parentOverrides,
+      childOverrides
+    )
+    console.log('Usdc gateways initialized')
+
+    await _addMinterRoleToL2Gateway(
+      l2UsdcGateway,
+      deployerL2,
+      masterMinter,
+      childOverrides
+    )
+    console.log('Minter role with max allowance added to L2 gateway')
+
+    addresses = {
+      proxyAdminL1: proxyAdminL1.address,
+      proxyAdminL2: proxyAdminL2.address,
+      l2Usdc: l2Usdc.address,
+      masterMinter: masterMinter.address,
+      l1UsdcGateway: l1UsdcGateway.address,
+      l2UsdcGateway: l2UsdcGateway.address,
+      sigCheckerLib: sigCheckerLib.address,
+      l2UsdcLogic: l2UsdcLogic.address,
+    }
+  }
+
+  // Always (re)generate the multisig tx payload with fresh fee params. Safe to
+  // run every invocation: in the default path it just writes the JSON file; in
+  // the ROLLUP_OWNER_KEY path it re-executes setGateway (idempotent on the
+  // router, same mapping).
   await _registerGateway(
     deployerL1.provider,
     deployerL2.provider,
     inbox,
-    l1UsdcGateway.address,
+    addresses.l1UsdcGateway,
     parentOverrides,
-    childOverrides,
+    childOverrides
   )
   if (!process.env['ROLLUP_OWNER_KEY']) {
     console.log(
@@ -178,18 +265,9 @@ async function main() {
     console.log('Usdc gateway registered')
   }
 
-  await _addMinterRoleToL2Gateway(l2UsdcGateway, deployerL2, masterMinter, childOverrides)
-  console.log('Minter role with max allowance added to L2 gateway')
-  fs.writeFileSync('/config/usdc.json', JSON.stringify({
-    proxyAdminL1: proxyAdminL1.address,
-    proxyAdminL2: proxyAdminL2.address,
-    l2Usdc: l2Usdc.address,
-    masterMinter: masterMinter.address,
-    l1UsdcGateway: l1UsdcGateway.address,
-    l2UsdcGateway: l2UsdcGateway.address,
-    sigCheckerLib: sigCheckerLib.address,
-    l2UsdcLogic: l2UsdcLogic.address,
-  }))
+  // Always write /config/usdc.json so the chart's write-addresses-cm init
+  // container can persist the ConfigMap on both fresh and reused runs.
+  fs.writeFileSync('/config/usdc.json', JSON.stringify(addresses))
 }
 
 async function _loadWallets(): Promise<{
