@@ -46,6 +46,27 @@ import { L1ToL2MessageGasParams } from '@arbitrum/sdk/dist/lib/message/L1ToL2Mes
 import { L1ContractCallTransactionReceipt } from '@arbitrum/sdk/dist/lib/message/L1Transaction'
 import { _getScaledAmount } from './local-deployment/localDeploymentLib'
 
+// ethers v5 hardcodes maxPriorityFeePerGas to 1.5 gwei in getFeeData(), which massively
+// overpays on Orbit L2s where the actual priority fee is 0.
+export function patchFeeData(provider: JsonRpcProvider): JsonRpcProvider {
+  provider.getFeeData = async () => {
+    const [block, gasPrice] = await Promise.all([
+      provider.getBlock('latest'),
+      provider.getGasPrice(),
+    ])
+    let maxPriorityFeePerGas = ethers.BigNumber.from(0)
+    try {
+      maxPriorityFeePerGas = ethers.BigNumber.from(await provider.send('eth_maxPriorityFeePerGas', []))
+    } catch {
+      // RPC doesn't support eth_maxPriorityFeePerGas — 0 is fine for most L2s
+    }
+    const baseFee = block.baseFeePerGas ?? ethers.BigNumber.from(0)
+    const maxFeePerGas = baseFee.mul(2).add(maxPriorityFeePerGas)
+    return { gasPrice, maxFeePerGas, maxPriorityFeePerGas, lastBaseFeePerGas: baseFee }
+  }
+  return provider
+}
+
 /**
  * Dummy non-zero address which is provided to logic contracts initializers
  */
@@ -70,6 +91,7 @@ export const createTokenBridge = async (
   rollupAddress: string,
   rollupOwnerAddress: string
 ) => {
+  patchFeeData(l2Provider as JsonRpcProvider)
   const gasPrice = await l2Provider.getGasPrice()
 
   //// run retryable estimate for deploying L2 factory
