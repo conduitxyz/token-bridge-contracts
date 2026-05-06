@@ -1,7 +1,7 @@
 import { JsonRpcProvider } from '@ethersproject/providers'
 import { L1Network, L2Network, addCustomNetwork } from '@arbitrum/sdk'
 import { RollupAdminLogic__factory } from '@arbitrum/sdk/dist/lib/abi/factories/RollupAdminLogic__factory'
-import { createTokenBridge, getSigner } from '../atomicTokenBridgeDeployer'
+import { createTokenBridge, getSigner, patchFeeData } from '../atomicTokenBridgeDeployer'
 import dotenv from 'dotenv'
 import { L1AtomicTokenBridgeCreator__factory } from '../../build/types'
 import * as fs from 'fs'
@@ -47,9 +47,9 @@ export const createTokenBridgeOnTargetChain = async () => {
 
   console.log('Creating token bridge for rollup', envVars.rollupAddress)
 
-  const l1Provider = new JsonRpcProvider(envVars.baseChainRpc)
+  const l1Provider = patchFeeData(new JsonRpcProvider(envVars.baseChainRpc))
   const l1Deployer = getSigner(l1Provider, envVars.baseChainDeployerKey)
-  const l2Provider = new JsonRpcProvider(envVars.childChainRpc)
+  const l2Provider = patchFeeData(new JsonRpcProvider(envVars.childChainRpc))
 
   const { l1Network, l2Network: corel2Network } = await registerNetworks(
     l1Provider,

@@ -55,6 +55,27 @@ import fs from 'fs'
 
 dotenv.config()
 
+// ethers v5 hardcodes maxPriorityFeePerGas to 1.5 gwei in getFeeData(), which massively
+// overpays on Orbit L2s where the actual priority fee is 0.
+function patchFeeData(provider: JsonRpcProvider): JsonRpcProvider {
+  provider.getFeeData = async () => {
+    const [block, gasPrice] = await Promise.all([
+      provider.getBlock('latest'),
+      provider.getGasPrice(),
+    ])
+    let maxPriorityFeePerGas = BigNumber.from(0)
+    try {
+      maxPriorityFeePerGas = BigNumber.from(await provider.send('eth_maxPriorityFeePerGas', []))
+    } catch {
+      // RPC doesn't support eth_maxPriorityFeePerGas — 0 is fine for most L2s
+    }
+    const baseFee = block.baseFeePerGas ?? BigNumber.from(0)
+    const maxFeePerGas = baseFee.mul(2).add(maxPriorityFeePerGas)
+    return { gasPrice, maxFeePerGas, maxPriorityFeePerGas, lastBaseFeePerGas: baseFee }
+  }
+  return provider
+}
+
 const REGISTRATION_TX_FILE = '/config/registerUsdcGatewayTx.json'
 
 main().then(() => console.log('Done.'))
@@ -180,10 +201,10 @@ async function _loadWallets(): Promise<{
   const childRpc = process.env['CHILD_RPC'] as string
   const childDeployerKey = process.env['CHILD_DEPLOYER_KEY'] as string
 
-  const parentProvider = new JsonRpcProvider(parentRpc)
+  const parentProvider = patchFeeData(new JsonRpcProvider(parentRpc))
   const deployerL1 = new ethers.Wallet(parentDeployerKey, parentProvider)
 
-  const childProvider = new JsonRpcProvider(childRpc)
+  const childProvider = patchFeeData(new JsonRpcProvider(childRpc))
   const deployerL2 = new ethers.Wallet(childDeployerKey, childProvider)
 
   return { deployerL1, deployerL2 }
