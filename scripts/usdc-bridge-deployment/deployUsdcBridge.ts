@@ -8,7 +8,12 @@ type SignerWithAddress = Signer & { address: string }
 
 async function toSignerWithAddress(signer: Signer): Promise<SignerWithAddress> {
   const address = await signer.getAddress()
-  return Object.assign(signer, { address }) as SignerWithAddress
+  // Object.assign can't overwrite ethers.Wallet.address (readonly getter).
+  // Use Object.create so address is an own property on the wrapper while
+  // all signer methods remain accessible via prototype chain.
+  const wrapped = Object.create(signer) as SignerWithAddress
+  Object.defineProperty(wrapped, 'address', { value: address, enumerable: true, configurable: true })
+  return wrapped
 }
 import {
   ERC20__factory,
