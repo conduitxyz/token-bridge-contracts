@@ -1,5 +1,15 @@
-import { BigNumber, Contract, ContractTransaction, Wallet } from 'ethers'
+import { BigNumber, Contract, ContractTransaction, Signer, Wallet } from 'ethers'
 import { ethers } from 'hardhat'
+import { makeSigner } from '../kms/GcpKmsSigner'
+
+// Signer extended with a pre-fetched address property so sync `.address`
+// accesses work for both ethers.Wallet and GcpKmsSigner.
+type SignerWithAddress = Signer & { address: string }
+
+async function toSignerWithAddress(signer: Signer): Promise<SignerWithAddress> {
+  const address = await signer.getAddress()
+  return Object.assign(signer, { address }) as SignerWithAddress
+}
 import {
   ERC20__factory,
   IBridge__factory,
@@ -151,13 +161,13 @@ async function main() {
   console.log('Loaded deployer wallets')
 
   const inbox = process.env['INBOX'] as string
-  await _registerNetworks(deployerL1.provider, deployerL2.provider, inbox)
+  await _registerNetworks(deployerL1.provider!, deployerL2.provider!, inbox)
   console.log('Networks registered in SDK')
 
   const parentChainId = await deployerL1.getChainId()
   let parentOverrides: Overrides = {}
   if (parentChainId === 42161 || parentChainId === 421614) {
-    const parentGasPrice = await deployerL1.provider.getGasPrice()
+    const parentGasPrice = await deployerL1.provider!.getGasPrice()
     console.log(`Parent gas price: ${parentGasPrice}`)
     console.log(`Adjusting parent maxFeePerGas to ${parentGasPrice.mul(3).div(2)}`)
     parentOverrides = {
@@ -165,7 +175,7 @@ async function main() {
       maxPriorityFeePerGas: 0,
     }
   }
-  const childGasPrice = await deployerL2.provider.getGasPrice()
+  const childGasPrice = await deployerL2.provider!.getGasPrice()
   console.log(`Child gas price: ${childGasPrice}`)
   console.log(`Adjusting child maxFeePerGas to ${childGasPrice.mul(3).div(2)}`)
   const childOverrides: Overrides = {
@@ -249,8 +259,8 @@ async function main() {
   // the ROLLUP_OWNER_KEY path it re-executes setGateway (idempotent on the
   // router, same mapping).
   await _registerGateway(
-    deployerL1.provider,
-    deployerL2.provider,
+    deployerL1.provider!,
+    deployerL2.provider!,
     inbox,
     addresses.l1UsdcGateway,
     parentOverrides,
@@ -271,30 +281,36 @@ async function main() {
 }
 
 async function _loadWallets(): Promise<{
-  deployerL1: Wallet
-  deployerL2: Wallet
+  deployerL1: SignerWithAddress
+  deployerL2: SignerWithAddress
 }> {
   const parentRpc = process.env['PARENT_RPC'] as string
-  const parentDeployerKey = process.env['PARENT_DEPLOYER_KEY'] as string
+  const parentDeployerKey = process.env['PARENT_DEPLOYER_KEY']
+  const parentDeployerKmsKey = process.env['PARENT_DEPLOYER_KMS_KEY']
   const childRpc = process.env['CHILD_RPC'] as string
-  const childDeployerKey = process.env['CHILD_DEPLOYER_KEY'] as string
+  const childDeployerKey = process.env['CHILD_DEPLOYER_KEY']
+  const childDeployerKmsKey = process.env['CHILD_DEPLOYER_KMS_KEY']
 
   const parentProvider = patchFeeData(new JsonRpcProvider(parentRpc))
-  const deployerL1 = new ethers.Wallet(parentDeployerKey, parentProvider)
+  const deployerL1 = await toSignerWithAddress(
+    makeSigner(parentDeployerKmsKey, parentDeployerKey, parentProvider)
+  )
 
   const childProvider = patchFeeData(new JsonRpcProvider(childRpc))
-  const deployerL2 = new ethers.Wallet(childDeployerKey, childProvider)
+  const deployerL2 = await toSignerWithAddress(
+    makeSigner(childDeployerKmsKey, childDeployerKey, childProvider)
+  )
 
   return { deployerL1, deployerL2 }
 }
 
-async function _deployProxyAdmin(deployer: Wallet, overrides?: Overrides): Promise<ProxyAdmin> {
+async function _deployProxyAdmin(deployer: SignerWithAddress, overrides?: Overrides): Promise<ProxyAdmin> {
   const proxyAdminFac = await new ProxyAdmin__factory(deployer).deploy(overrides)
   return await proxyAdminFac.deployed()
 }
 
 async function _deployBridgedUsdc(
-  deployerL2Wallet: Wallet,
+  deployerL2Wallet: SignerWithAddress,
   proxyAdminL2: ProxyAdmin,
   overrides: Overrides
 ) {
@@ -393,7 +409,7 @@ async function _deployBridgedUsdc(
   return { l2Usdc, l2UsdcLogic, masterMinter, sigCheckerLib }
 }
 
-async function _deployUsdcLogic(deployer: Wallet, overrides: Overrides) {
+async function _deployUsdcLogic(deployer: SignerWithAddress, overrides: Overrides) {
   /// deploy sig checker library
   const sigCheckerFac = new ethers.ContractFactory(
     SigCheckerAbi,
@@ -425,7 +441,7 @@ async function _deployUsdcLogic(deployer: Wallet, overrides: Overrides) {
 }
 
 async function _deployUsdcProxy(
-  deployer: Wallet,
+  deployer: SignerWithAddress,
   bridgedUsdcLogic: string,
   proxyAdmin: string,
   overrides: Overrides
@@ -451,13 +467,13 @@ async function _deployUsdcProxy(
 }
 
 async function _deployL1UsdcGateway(
-  deployerL1: Wallet,
+  deployerL1: SignerWithAddress,
   proxyAdmin: ProxyAdmin,
   inboxAddress: string,
   overrides: Overrides
 ): Promise<L1USDCGateway | L1OrbitUSDCGateway> {
   const isFeeToken =
-    (await _getFeeToken(inboxAddress, deployerL1.provider)) !=
+    (await _getFeeToken(inboxAddress, deployerL1.provider!)) !=
     ethers.constants.AddressZero
 
   const l1UsdcGatewayFactory = isFeeToken
@@ -474,7 +490,7 @@ async function _deployL1UsdcGateway(
 }
 
 async function _deployL2UsdcGateway(
-  deployerL2: Wallet,
+  deployerL2: SignerWithAddress,
   proxyAdmin: ProxyAdmin,
   overrides: Overrides,
 ): Promise<L2USDCGateway> {
@@ -497,8 +513,8 @@ async function _initializeGateways(
   l2UsdcGateway: L2USDCGateway,
   inbox: string,
   l2Usdc: string,
-  deployerL1: Wallet,
-  deployerL2: Wallet,
+  deployerL1: SignerWithAddress,
+  deployerL2: SignerWithAddress,
   overridesL1: Overrides,
   overridesL2: Overrides
 ) {
@@ -742,7 +758,7 @@ async function _registerGateway(
  */
 async function _addMinterRoleToL2Gateway(
   l2UsdcGateway: L2USDCGateway,
-  masterMinterOwner: Wallet,
+  masterMinterOwner: SignerWithAddress,
   masterMinter: Contract,
   overrides: Overrides
 ) {

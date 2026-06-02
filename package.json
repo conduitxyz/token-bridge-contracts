@@ -44,6 +44,7 @@
   ],
   "dependencies": {
     "@arbitrum/nitro-contracts": "1.1.1",
+    "@google-cloud/kms": "^4.5.0",
     "@offchainlabs/stablecoin-evm": "1.0.0-orbit-alpha.2",
     "@offchainlabs/upgrade-executor": "1.1.0-beta.0",
     "@openzeppelin/contracts": "4.8.3",
