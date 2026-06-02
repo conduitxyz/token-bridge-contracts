@@ -5,12 +5,14 @@ import { createPublicKey } from 'crypto'
 function parseDerEcdsaSig(der: Buffer): { r: bigint; s: bigint } {
   // DER SEQUENCE { INTEGER R, INTEGER S }
   // 30 LL [02 RL R...] [02 SL S...]
+  // der is a fixed-format KMS response buffer, not user-controlled input.
   let offset = 2
-  if (der[1] & 0x80) offset += der[1] & 0x7f  // long-form length (shouldn't happen for secp256k1)
-  const rLen = der[offset + 1]
+  const firstLenByte = der.readUInt8(1)
+  if (firstLenByte & 0x80) offset += firstLenByte & 0x7f  // long-form length (shouldn't happen for secp256k1)
+  const rLen = der.readUInt8(offset + 1)
   const r = BigInt('0x' + der.slice(offset + 2, offset + 2 + rLen).toString('hex'))
   offset += 2 + rLen
-  const sLen = der[offset + 1]
+  const sLen = der.readUInt8(offset + 1)
   const s = BigInt('0x' + der.slice(offset + 2, offset + 2 + sLen).toString('hex'))
   return { r, s }
 }
