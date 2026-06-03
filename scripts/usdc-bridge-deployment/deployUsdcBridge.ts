@@ -931,9 +931,7 @@ async function _getFeeToken(
 function _checkEnvVars() {
   const requiredEnvVars = [
     'PARENT_RPC',
-    'PARENT_DEPLOYER_KEY',
     'CHILD_RPC',
-    'CHILD_DEPLOYER_KEY',
     'L1_ROUTER',
     'L2_ROUTER',
     'INBOX',
@@ -944,6 +942,14 @@ function _checkEnvVars() {
     if (!process.env[envVar]) {
       throw new Error(`Missing env var ${envVar}`)
     }
+  }
+
+  // Either raw key or KMS key must be set for each chain
+  if (!process.env['PARENT_DEPLOYER_KEY'] && !process.env['PARENT_DEPLOYER_KMS_KEY']) {
+    throw new Error('Missing env var: either PARENT_DEPLOYER_KEY or PARENT_DEPLOYER_KMS_KEY must be set')
+  }
+  if (!process.env['CHILD_DEPLOYER_KEY'] && !process.env['CHILD_DEPLOYER_KMS_KEY']) {
+    throw new Error('Missing env var: either CHILD_DEPLOYER_KEY or CHILD_DEPLOYER_KMS_KEY must be set')
   }
 }
 
