@@ -1,10 +1,10 @@
-import { BigNumber, Contract, ContractTransaction, Signer, Wallet } from 'ethers'
+import { BigNumber, Contract, ContractTransaction, providers, Signer, Wallet } from 'ethers'
 import { ethers } from 'hardhat'
 import { makeSigner } from '../kms/GcpKmsSigner'
 
 // Signer extended with a pre-fetched address property so sync `.address`
 // accesses work for both ethers.Wallet and GcpKmsSigner.
-type SignerWithAddress = Signer & { address: string }
+type SignerWithAddress = Signer & { address: string; provider: providers.Provider }
 
 async function toSignerWithAddress(signer: Signer): Promise<SignerWithAddress> {
   const address = await signer.getAddress()
@@ -166,13 +166,13 @@ async function main() {
   console.log('Loaded deployer wallets')
 
   const inbox = process.env['INBOX'] as string
-  await _registerNetworks(deployerL1.provider!, deployerL2.provider!, inbox)
+  await _registerNetworks(deployerL1.provider, deployerL2.provider, inbox)
   console.log('Networks registered in SDK')
 
   const parentChainId = await deployerL1.getChainId()
   let parentOverrides: Overrides = {}
   if (parentChainId === 42161 || parentChainId === 421614) {
-    const parentGasPrice = await deployerL1.provider!.getGasPrice()
+    const parentGasPrice = await deployerL1.provider.getGasPrice()
     console.log(`Parent gas price: ${parentGasPrice}`)
     console.log(`Adjusting parent maxFeePerGas to ${parentGasPrice.mul(3).div(2)}`)
     parentOverrides = {
@@ -180,7 +180,7 @@ async function main() {
       maxPriorityFeePerGas: 0,
     }
   }
-  const childGasPrice = await deployerL2.provider!.getGasPrice()
+  const childGasPrice = await deployerL2.provider.getGasPrice()
   console.log(`Child gas price: ${childGasPrice}`)
   console.log(`Adjusting child maxFeePerGas to ${childGasPrice.mul(3).div(2)}`)
   const childOverrides: Overrides = {
@@ -264,8 +264,8 @@ async function main() {
   // the ROLLUP_OWNER_KEY path it re-executes setGateway (idempotent on the
   // router, same mapping).
   await _registerGateway(
-    deployerL1.provider!,
-    deployerL2.provider!,
+    deployerL1.provider,
+    deployerL2.provider,
     inbox,
     addresses.l1UsdcGateway,
     parentOverrides,
@@ -478,7 +478,7 @@ async function _deployL1UsdcGateway(
   overrides: Overrides
 ): Promise<L1USDCGateway | L1OrbitUSDCGateway> {
   const isFeeToken =
-    (await _getFeeToken(inboxAddress, deployerL1.provider!)) !=
+    (await _getFeeToken(inboxAddress, deployerL1.provider)) !=
     ethers.constants.AddressZero
 
   const l1UsdcGatewayFactory = isFeeToken
