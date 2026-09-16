@@ -257,7 +257,7 @@ contract L2AtomicTokenBridgeFactory {
 
         // init L2Weth
         aeWETH(payable(canonicalL2Weth)).initialize(
-            "WETH", "WETH", 18, canonicalL2WethGateway, l1Weth
+            "WHYPE", "WHYPE", 18, canonicalL2WethGateway, l1Weth
         );
     }
 
